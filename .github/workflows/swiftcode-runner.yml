@@ -1,0 +1,64 @@
+name: SwiftCode runner
+run-name: SwiftCode ${{ inputs.session_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: swiftcode-runner
+  cancel-in-progress: false
+jobs:
+  runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: tailscale/github-action@99a8333667fff04fdd6cffb46dfd409f8329a7bf
+        with:
+          oauth-client-id: "TkF9qvWcNM41CNTRL-k43esbWdbd11CNTRL"
+          audience: "api.tailscale.com/TkF9qvWcNM41CNTRL-k43esbWdbd11CNTRL"
+          tags: "tag:swiftcode-runner"
+          hostname: swiftcode-${{ inputs.session_id }}
+      - name: Install SwiftCode
+        env:
+          ARTIFACT_URL: "https://github.com/Maol-1997/swiftcode-runner-test/releases/download/v0.0.31-runner.2/swiftcode-server-0.0.31.tar.gz"
+          ARTIFACT_SHA256: "6359009f66db795dbdf3350400e8545dbcc160e8f4764121d31fe43f7b162c2f"
+        run: |
+          curl --fail --location --proto '=https' --tlsv1.2 "$ARTIFACT_URL" -o "$RUNNER_TEMP/swiftcode.tar.gz"
+          printf '%s  %s\n' "$ARTIFACT_SHA256" "$RUNNER_TEMP/swiftcode.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/swiftcode"
+          tar -xzf "$RUNNER_TEMP/swiftcode.tar.gz" -C "$RUNNER_TEMP/swiftcode"
+          cd "$RUNNER_TEMP/swiftcode"
+          npm install --omit=dev --no-audit --no-fund
+          mkdir "$RUNNER_TEMP/claude-cli" "$RUNNER_TEMP/codex-cli"
+          printf '%s' '{"private":true,"allowScripts":{"@anthropic-ai/claude-code":true}}' > "$RUNNER_TEMP/claude-cli/package.json"
+          printf '%s' '{"private":true,"allowScripts":{"@openai/codex":true}}' > "$RUNNER_TEMP/codex-cli/package.json"
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund @anthropic-ai/claude-code > "$RUNNER_TEMP/claude-install.log" 2>&1 &
+          claude_install_pid=$!
+          npm install --prefix "$RUNNER_TEMP/codex-cli" --no-audit --no-fund @openai/codex > "$RUNNER_TEMP/codex-install.log" 2>&1 &
+          codex_install_pid=$!
+          install_status=0
+          wait "$claude_install_pid" || install_status=1
+          wait "$codex_install_pid" || install_status=1
+          test "$install_status" -eq 0
+          echo "$RUNNER_TEMP/claude-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/swiftcode/bin" >> "$GITHUB_PATH"
+      - name: Run SwiftCode
+        env:
+          SWIFTCODE_RUNNER_BOOTSTRAP: ${{ secrets.SWIFTCODE_RUNNER_SESSION }}
+          SWIFTCODE_RUNNER_SESSION_ID: ${{ inputs.session_id }}
+          T3CODE_HOME: ${{ runner.temp }}/swiftcode-home
+        run: |
+          set +x
+          swiftcode-server serve --github-runner --host 127.0.0.1 --port 3773 --tailscale-serve > "$RUNNER_TEMP/swiftcode-runner.log" 2>&1
