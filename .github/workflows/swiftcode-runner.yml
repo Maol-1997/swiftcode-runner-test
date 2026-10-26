@@ -31,11 +31,32 @@ jobs:
           hostname: swiftcode-${{ inputs.session_id }}
       - name: Install SwiftCode
         env:
-          ARTIFACT_URL: "https://github.com/Maol-1997/swiftcode-runner-test/releases/download/v0.0.31-runner.2/swiftcode-server-0.0.31.tar.gz"
-          ARTIFACT_SHA256: "6359009f66db795dbdf3350400e8545dbcc160e8f4764121d31fe43f7b162c2f"
+          SWIFTCODE_RUNNER_BOOTSTRAP: ${{ secrets.SWIFTCODE_RUNNER_SESSION }}
+          SWIFTCODE_RUNNER_SESSION_ID: ${{ inputs.session_id }}
         run: |
-          curl --fail --location --proto '=https' --tlsv1.2 "$ARTIFACT_URL" -o "$RUNNER_TEMP/swiftcode.tar.gz"
-          printf '%s  %s\n' "$ARTIFACT_SHA256" "$RUNNER_TEMP/swiftcode.tar.gz" | sha256sum --check
+          set +x
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { writeFile } from 'node:fs/promises';
+          const bootstrap = JSON.parse(process.env.SWIFTCODE_RUNNER_BOOTSTRAP);
+          const url = new URL(bootstrap.gatewayUrl);
+          if (bootstrap.sessionId !== process.env.SWIFTCODE_RUNNER_SESSION_ID ||
+              !/^[a-f0-9]{16}$/.test(bootstrap.sessionId) ||
+              url.protocol !== 'https:' || !url.hostname.endsWith('.ts.net') ||
+              url.port !== '8443' || url.username || url.password || url.search || url.hash ||
+              url.pathname !== '/swiftcode-runner/' + bootstrap.sessionId + '/' + url.pathname.split('/').at(-1) ||
+              !/^[\w-]{43}$/.test(url.pathname.split('/').at(-1)) ||
+              !/^[a-f0-9]{64}$/.test(bootstrap.artifactSha256)) throw new Error('Invalid runner bootstrap');
+          url.pathname += '/artifact';
+          const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(120000) })
+            .catch(() => { throw new Error('Could not reach the local SwiftCode gateway'); });
+          if (!response.ok) throw new Error('SwiftCode download failed');
+          const body = Buffer.from(await response.arrayBuffer());
+          if (createHash('sha256').update(body).digest('hex') !== bootstrap.artifactSha256)
+            throw new Error('SwiftCode checksum mismatch');
+          await writeFile(process.env.RUNNER_TEMP + '/swiftcode.tar.gz', body, { mode: 0o600 });
+          NODE
+          unset SWIFTCODE_RUNNER_BOOTSTRAP
           mkdir "$RUNNER_TEMP/swiftcode"
           tar -xzf "$RUNNER_TEMP/swiftcode.tar.gz" -C "$RUNNER_TEMP/swiftcode"
           cd "$RUNNER_TEMP/swiftcode"
