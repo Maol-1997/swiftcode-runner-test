@@ -83,7 +83,11 @@ jobs:
           T3CODE_HOME: ${{ runner.temp }}/swiftcode-home
         run: |
           set +x
-          if swiftcode-server serve --github-runner --host 127.0.0.1 --port 3773 --tailscale-serve > "$RUNNER_TEMP/swiftcode-runner.log" 2>&1; then
+          if (
+            dns_name=$(tailscale status --json | node --input-type=module -e 'let data=""; for await (const part of process.stdin) data+=part; console.log(JSON.parse(data).Self.DNSName.replace(/\.$/, ""))') &&
+            tailscale cert --cert-file "$RUNNER_TEMP/swiftcode.crt" --key-file "$RUNNER_TEMP/swiftcode.key" "$dns_name" &&
+            swiftcode-server serve --github-runner --host 127.0.0.1 --port 3773 --tailscale-serve
+          ) > "$RUNNER_TEMP/swiftcode-runner.log" 2>&1; then
             exit 0
           fi
           node --input-type=module <<'NODE'
