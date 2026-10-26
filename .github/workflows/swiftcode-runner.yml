@@ -29,6 +29,7 @@ jobs:
           audience: "api.tailscale.com/TkF9qvWcNM41CNTRL-k43esbWdbd11CNTRL"
           tags: "tag:swiftcode-runner"
           hostname: swiftcode-${{ inputs.session_id }}
+          statedir: ${{ runner.temp }}/tailscale-state
       - name: Install SwiftCode
         env:
           SWIFTCODE_RUNNER_BOOTSTRAP: ${{ secrets.SWIFTCODE_RUNNER_SESSION }}
