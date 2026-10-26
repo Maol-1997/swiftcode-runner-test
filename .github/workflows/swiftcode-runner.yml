@@ -82,4 +82,17 @@ jobs:
           T3CODE_HOME: ${{ runner.temp }}/swiftcode-home
         run: |
           set +x
-          swiftcode-server serve --github-runner --host 127.0.0.1 --port 3773 --tailscale-serve > "$RUNNER_TEMP/swiftcode-runner.log" 2>&1
+          if swiftcode-server serve --github-runner --host 127.0.0.1 --port 3773 --tailscale-serve > "$RUNNER_TEMP/swiftcode-runner.log" 2>&1; then
+            exit 0
+          fi
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const bootstrap = JSON.parse(process.env.SWIFTCODE_RUNNER_BOOTSTRAP);
+          const log = await readFile(process.env.RUNNER_TEMP + '/swiftcode-runner.log', 'utf8');
+          await fetch(bootstrap.gatewayUrl + '/session', {
+            method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ busy: false, lastActivityAt: Date.now(), startupError: log.slice(-1024) })
+          }).catch(() => {});
+          NODE
+          exit 1
