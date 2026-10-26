@@ -35,6 +35,7 @@ jobs:
           SWIFTCODE_RUNNER_SESSION_ID: ${{ inputs.session_id }}
         run: |
           set +x
+          sudo tailscale set --operator="$USER"
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto';
           import { writeFile } from 'node:fs/promises';
